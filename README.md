@@ -8,6 +8,8 @@
 # MIDI Router
 MIDI Router is a straightforward Java application designed for MIDI routing, transposing, and octave shifting. This tool allows you to route a single MIDI input device to up to two MIDI output devices, while also providing functionality to transpose by +/- 1 semitone and octave shift.
 
+## Dependencies
+To run jar or exe file you need [Java JRE](https://adoptium.net/temurin/releases/?os=windows&arch=aarch64&package=jre&version=17) installed before you can launch MIDI Router
 ## Usage
 
 1. **Virtual MIDI Devices:**
