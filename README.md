@@ -29,4 +29,4 @@ To run jar or exe file you need [Java JRE](https://adoptium.net/temurin/releases
    - Press the start button to activate MIDI routing, transpose, and octave shift.
 
 ## Download
-latest release
+  [![Download](https://img.shields.io/github/release/serifpersia/midi-router.svg?style=flat-square)](https://github.com/serifpersia/midi-router/releases)
