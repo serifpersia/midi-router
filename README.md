@@ -4,7 +4,7 @@ MIDI Router is a straightforward Java application designed for MIDI routing, tra
 ## Usage
 
 1. **Virtual MIDI Devices:**
-   - To route a single MIDI device to two virtual MIDI devices, it is recommended to use [loopMIDI](https://www.tobias-erichsen.de/software/loopmidi.html).
+   - To route a single MIDI device to two virtual MIDI devices, it is recommended to use loopMIDI
    - Follow the steps below to set up virtual MIDI devices using loopMIDI.
 
 2. **Setup with loopMIDI:**
