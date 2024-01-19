@@ -6,11 +6,41 @@
 	<artifactId>midi-router</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
 	<name>MIDI Router</name>
-		<dependencies>
+	<dependencies>
 		<dependency>
 			<groupId>com.formdev</groupId>
 			<artifactId>flatlaf</artifactId>
 			<version>3.1.1</version>
 		</dependency>
 	</dependencies>
+
+	<build>
+		<plugins>
+			<!-- Add the maven-assembly-plugin for creating a fat JAR -->
+			<plugin>
+				<artifactId>maven-assembly-plugin</artifactId>
+				<version>3.3.0</version>
+				<executions>
+					<execution>
+						<phase>install</phase>
+						<goals>
+							<goal>single</goal>
+						</goals>
+					</execution>
+				</executions>
+				<configuration>
+					<descriptorRefs>
+						<descriptorRef>jar-with-dependencies</descriptorRef>
+					</descriptorRefs>
+					<archive>
+						<manifest>
+							<mainClass>
+								midi.router.MidiRouter</mainClass>
+						</manifest>
+					</archive>
+				</configuration>
+			</plugin>
+		</plugins>
+	</build>
+
 </project>
