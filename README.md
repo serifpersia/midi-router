@@ -5,7 +5,8 @@
   [![Release](https://img.shields.io/github/release/serifpersia/midi-router.svg?style=flat-square)](https://github.com/serifpersia/midi-router/releases)
   [![License](https://img.shields.io/github/license/serifpersia/midi-router?color=blue&style=flat-square)](https://raw.githubusercontent.com/serifpersia/midi-router/master/LICENSE)
 </div>
-# MIDI Router
+
+## MIDI Router
 MIDI Router is a straightforward Java application designed for MIDI routing, transposing, and octave shifting. This tool allows you to route a single MIDI input device to up to two MIDI output devices, while also providing functionality to transpose by +/- 1 semitone and octave shift.
 
 ## Dependencies
