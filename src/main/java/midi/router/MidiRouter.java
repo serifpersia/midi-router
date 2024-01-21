@@ -25,13 +25,36 @@ public class MidiRouter extends JFrame {
 	private JLabel transposeLabel;
 	private JLabel octaveShiftLabel;
 
-	public MidiRouter() throws MidiUnavailableException {
-		// Set FlatLaf look and feel
+	/**
+	 * Launch the application.
+	 */
+	public static void main(String[] args) {
+		// Set the look and feel to FlatLaf Dark
 		try {
 			UIManager.setLookAndFeel(new FlatDarkLaf());
 		} catch (UnsupportedLookAndFeelException e) {
 			e.printStackTrace();
 		}
+
+		EventQueue.invokeLater(new Runnable() {
+			public void run() {
+				try {
+					MidiRouter frame = new MidiRouter();
+					frame.setVisible(true);
+				} catch (Exception e) {
+					e.printStackTrace();
+				}
+			}
+		});
+	}
+
+	public MidiRouter() throws MidiUnavailableException {
+		setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+		setResizable(false);
+		setSize(400, 250);
+		setTitle("MIDI Router - Transpose & Octave Shift");
+		setIconImage(new ImageIcon(getClass().getResource("/logo.png")).getImage());
+
 		initMidi();
 		initComponents();
 	}
@@ -62,11 +85,6 @@ public class MidiRouter extends JFrame {
 	}
 
 	private void initComponents() {
-		setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-		setResizable(false);
-		setSize(400, 250);
-		setTitle("MIDI Router - Transpose & Octave Shift");
-		setIconImage(new ImageIcon(getClass().getResource("/logo.png")).getImage());
 
 		JPanel mainPanel = new JPanel(new GridLayout(3, 1));
 
@@ -228,124 +246,112 @@ public class MidiRouter extends JFrame {
 		octaveShiftLabel.setText("Octave Shift: " + transposingReceiver.getOctaveShift());
 	}
 
-	public static void main(String[] args) {
-		SwingUtilities.invokeLater(new Runnable() {
-			@Override
-			public void run() {
-				try {
-					new MidiRouter().setVisible(true);
-				} catch (MidiUnavailableException e) {
-					e.printStackTrace();
+	class FilteringReceiver implements Receiver {
+		private Receiver delegate;
+
+		public FilteringReceiver(Receiver delegate) {
+			this.delegate = delegate;
+		}
+
+		@Override
+		public void send(MidiMessage message, long timeStamp) {
+			if (message instanceof ShortMessage) {
+				ShortMessage shortMessage = (ShortMessage) message;
+				int command = shortMessage.getCommand();
+				if (command == ShortMessage.NOTE_ON || command == ShortMessage.NOTE_OFF
+						|| (command == ShortMessage.CONTROL_CHANGE)) {
+					delegate.send(message, timeStamp);
 				}
-			}
-		});
-	}
-
-}
-
-class FilteringReceiver implements Receiver {
-	private Receiver delegate;
-
-	public FilteringReceiver(Receiver delegate) {
-		this.delegate = delegate;
-	}
-
-	@Override
-	public void send(MidiMessage message, long timeStamp) {
-		if (message instanceof ShortMessage) {
-			ShortMessage shortMessage = (ShortMessage) message;
-			int command = shortMessage.getCommand();
-			if (command == ShortMessage.NOTE_ON || command == ShortMessage.NOTE_OFF) {
+			} else {
 				delegate.send(message, timeStamp);
 			}
-		} else {
-			delegate.send(message, timeStamp);
 		}
-	}
 
-	@Override
-	public void close() {
-		delegate.close();
-	}
-}
-
-class MultiOutputReceiver implements Receiver {
-	private List<Receiver> delegates;
-
-	public MultiOutputReceiver(List<Receiver> delegates) {
-		this.delegates = delegates;
-	}
-
-	@Override
-	public void send(MidiMessage message, long timeStamp) {
-		for (Receiver delegate : delegates) {
-			delegate.send(message, timeStamp);
-		}
-	}
-
-	@Override
-	public void close() {
-		for (Receiver delegate : delegates) {
+		@Override
+		public void close() {
 			delegate.close();
 		}
 	}
-}
 
-class TransposingReceiver extends FilteringReceiver {
-	private int transposeValue = 0;
-	private int octaveShift = 0;
-	private MultiOutputReceiver multiOutputReceiver;
+	class MultiOutputReceiver implements Receiver {
+		private List<Receiver> delegates;
 
-	public TransposingReceiver(List<Receiver> outputDelegates) {
-		super(null); // No need to delegate to a single receiver
-		multiOutputReceiver = new MultiOutputReceiver(outputDelegates);
+		public MultiOutputReceiver(List<Receiver> delegates) {
+			this.delegates = delegates;
+		}
+
+		@Override
+		public void send(MidiMessage message, long timeStamp) {
+			for (Receiver delegate : delegates) {
+				delegate.send(message, timeStamp);
+			}
+		}
+
+		@Override
+		public void close() {
+			for (Receiver delegate : delegates) {
+				delegate.close();
+			}
+		}
 	}
 
-	public void setTransposeValue(int transposeValue) {
-		this.transposeValue = transposeValue;
-	}
+	class TransposingReceiver extends FilteringReceiver {
+		private int transposeValue = 0;
+		private int octaveShift = 0;
+		private MultiOutputReceiver multiOutputReceiver;
 
-	public int getTransposeValue() {
-		return transposeValue;
-	}
+		public TransposingReceiver(List<Receiver> outputDelegates) {
+			super(null); // No need to delegate to a single receiver
+			multiOutputReceiver = new MultiOutputReceiver(outputDelegates);
+		}
 
-	public void setOctaveShift(int octaveShift) {
-		this.octaveShift = octaveShift;
-	}
+		public void setTransposeValue(int transposeValue) {
+			this.transposeValue = transposeValue;
+		}
 
-	public int getOctaveShift() {
-		return octaveShift;
-	}
+		public int getTransposeValue() {
+			return transposeValue;
+		}
 
-	@Override
-	public void send(MidiMessage message, long timeStamp) {
-		if (message instanceof ShortMessage) {
-			ShortMessage shortMessage = (ShortMessage) message;
-			int command = shortMessage.getCommand();
+		public void setOctaveShift(int octaveShift) {
+			this.octaveShift = octaveShift;
+		}
 
-			if (command == ShortMessage.NOTE_ON || command == ShortMessage.NOTE_OFF) {
-				int originalData = shortMessage.getData1();
-				int transposedData = originalData + transposeValue;
-				int transposedOctave = (transposedData / 12) - 1;
+		public int getOctaveShift() {
+			return octaveShift;
+		}
 
-				transposedOctave += octaveShift;
+		@Override
+		public void send(MidiMessage message, long timeStamp) {
+			if (message instanceof ShortMessage) {
+				ShortMessage shortMessage = (ShortMessage) message;
+				int command = shortMessage.getCommand();
 
-				transposedData = Math.max(0, Math.min(127, transposedData));
+				if (command == ShortMessage.NOTE_ON || command == ShortMessage.NOTE_OFF) {
+					int originalData = shortMessage.getData1();
+					int transposedData = originalData + transposeValue;
+					int transposedOctave = (transposedData / 12) - 1;
 
-				transposedData = (transposedOctave + 1) * 12 + (transposedData % 12);
+					transposedOctave += octaveShift;
 
-				try {
-					ShortMessage transposedMessage = new ShortMessage(command, shortMessage.getChannel(),
-							transposedData, shortMessage.getData2());
-					multiOutputReceiver.send(transposedMessage, timeStamp);
-				} catch (InvalidMidiDataException e) {
-					e.printStackTrace();
+					transposedData = Math.max(0, Math.min(127, transposedData));
+
+					transposedData = (transposedOctave + 1) * 12 + (transposedData % 12);
+
+					try {
+						ShortMessage transposedMessage = new ShortMessage(command, shortMessage.getChannel(),
+								transposedData, shortMessage.getData2());
+						multiOutputReceiver.send(transposedMessage, timeStamp);
+					} catch (InvalidMidiDataException e) {
+						e.printStackTrace();
+					}
+				} else {
+					multiOutputReceiver.send(message, timeStamp);
 				}
 			} else {
 				multiOutputReceiver.send(message, timeStamp);
 			}
-		} else {
-			multiOutputReceiver.send(message, timeStamp);
 		}
+
 	}
 }
