@@ -1,6 +1,7 @@
 <div align="center">
 
-![image](https://github.com/serifpersia/midi-router/assets/62844718/e123af14-e63c-490d-ab8d-122c1483d290)
+![image](https://github.com/serifpersia/midi-router/assets/62844718/85f3bcaf-6802-49ee-8a06-e66f2dfe6d4a)
+
 
 
   [![Release](https://img.shields.io/github/release/serifpersia/midi-router.svg?style=flat-square)](https://github.com/serifpersia/midi-router/releases)
