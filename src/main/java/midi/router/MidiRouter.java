@@ -1,57 +1,55 @@
 package midi.router;
 
-import javax.sound.midi.*;
-import javax.swing.*;
+import java.awt.EventQueue;
+import java.awt.FlowLayout;
+import java.awt.GridLayout;
+import java.util.ArrayList;	
+import java.util.List;
+
+import javax.swing.ImageIcon;
+import javax.swing.JOptionPane;
+import javax.swing.JButton;
+import javax.swing.JComboBox;
+import javax.swing.JFrame;
+import javax.swing.JLabel;
+import javax.swing.JPanel;
+import javax.swing.UIManager;
+import javax.swing.UnsupportedLookAndFeelException;
 
 import com.formdev.flatlaf.FlatDarkLaf;
 
-import java.awt.*;
-import java.awt.event.ActionEvent;
-import java.awt.event.ActionListener;
-import java.util.ArrayList;
-import java.util.List;
+import javax.sound.midi.InvalidMidiDataException;
+import javax.sound.midi.MidiDevice;
+import javax.sound.midi.MidiMessage;
+import javax.sound.midi.MidiSystem;
+import javax.sound.midi.MidiUnavailableException;
+import javax.sound.midi.Receiver;
+import javax.sound.midi.ShortMessage;
 
 @SuppressWarnings("serial")
 public class MidiRouter extends JFrame {
 
 	private boolean isRunning = false;
-	private MidiDevice inputDevice;
-	private MidiDevice outputDevice1;
-	private MidiDevice outputDevice2;
-	private JComboBox<MidiDevice.Info> inputDeviceDropdown;
-	private JComboBox<MidiDevice.Info> outputDeviceDropdown1;
-	private JComboBox<MidiDevice.Info> outputDeviceDropdown2;
+	private MidiDevice inputDevice, outputDevice1, outputDevice2;
+	private JComboBox<MidiDevice.Info> inputDeviceDropdown, outputDeviceDropdown1, outputDeviceDropdown2;
 	private TransposingReceiver transposingReceiver;
-	private JLabel transposeLabel;
-	private JLabel octaveShiftLabel;
+	private JLabel transposeLabel, octaveShiftLabel;
 
-	/**
-	 * Launch the application.
-	 */
 	public static void main(String[] args) {
-		// Set the look and feel to FlatLaf Dark
-		try {
-			UIManager.setLookAndFeel(new FlatDarkLaf());
-		} catch (UnsupportedLookAndFeelException e) {
-			e.printStackTrace();
-		}
-
-		EventQueue.invokeLater(new Runnable() {
-			public void run() {
-				try {
-					MidiRouter frame = new MidiRouter();
-					frame.setVisible(true);
-				} catch (Exception e) {
-					e.printStackTrace();
-				}
+		EventQueue.invokeLater(() -> {
+			try {
+				UIManager.setLookAndFeel(new FlatDarkLaf());
+				MidiRouter frame = new MidiRouter();
+				frame.setVisible(true);
+			} catch (UnsupportedLookAndFeelException | MidiUnavailableException e) {
+				e.printStackTrace();
 			}
 		});
 	}
 
 	public MidiRouter() throws MidiUnavailableException {
 		setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-		setResizable(false);
-		setSize(400, 250);
+		setSize(395, 235);
 		setTitle("MIDI Router - Transpose & Octave Shift");
 		setIconImage(new ImageIcon(getClass().getResource("/logo.png")).getImage());
 
@@ -85,11 +83,26 @@ public class MidiRouter extends JFrame {
 	}
 
 	private void initComponents() {
-
 		JPanel mainPanel = new JPanel(new GridLayout(3, 1));
+		JPanel inputOutputPanel = new JPanel(new GridLayout(3, 1));
+		
+		FlowLayout fl_buttonPanel = new FlowLayout(FlowLayout.CENTER);
+		fl_buttonPanel.setVgap(20);
+		JPanel buttonPanel = new JPanel(fl_buttonPanel);
+		
+		JButton toggleButton = new JButton("Start");
+		FlowLayout fl_transposePanel = new FlowLayout(FlowLayout.CENTER);
+		fl_transposePanel.setVgap(20);
+		JPanel transposePanel = new JPanel(fl_transposePanel);
+		JButton transposeDownButton = new JButton("-");
+		JButton transposeUpButton = new JButton("+");
+		JButton octaveDownButton = new JButton("↓");
+		JButton octaveUpButton = new JButton("↑");
 
-		GridLayout gl_inputOutputPanel = new GridLayout(3, 1);
-		JPanel inputOutputPanel = new JPanel(gl_inputOutputPanel);
+		transposeLabel = new JLabel("Transpose: 0");
+		octaveShiftLabel = new JLabel("Octave Shift: 0");
+
+		// Add components to panels
 		inputOutputPanel.add(new JLabel("MIDI Input:"));
 		inputOutputPanel.add(inputDeviceDropdown);
 		inputOutputPanel.add(new JLabel("MIDI Output 1:"));
@@ -97,36 +110,7 @@ public class MidiRouter extends JFrame {
 		inputOutputPanel.add(new JLabel("MIDI Output 2:"));
 		inputOutputPanel.add(outputDeviceDropdown2);
 
-		JPanel buttonPanel = new JPanel(new BorderLayout());
-
-		JButton toggleButton = new JButton("Start");
-
-		toggleButton.addActionListener(new ActionListener() {
-			@Override
-			public void actionPerformed(ActionEvent e) {
-				if (isRunning) {
-					stopMidiRouting();
-					toggleButton.setText("Start");
-				} else {
-					startMidiRouting();
-					toggleButton.setText("Stop");
-				}
-				isRunning = !isRunning;
-			}
-		});
-
 		buttonPanel.add(toggleButton);
-
-		FlowLayout fl_transposePanel = new FlowLayout(FlowLayout.CENTER);
-		fl_transposePanel.setVgap(25);
-		JPanel transposePanel = new JPanel(fl_transposePanel);
-		transposeLabel = new JLabel("Transpose: 0");
-		JButton transposeDownButton = new JButton("-");
-		JButton transposeUpButton = new JButton("+");
-
-		octaveShiftLabel = new JLabel("Octave Shift: 0");
-		JButton octaveDownButton = new JButton("↓");
-		JButton octaveUpButton = new JButton("↑");
 
 		transposePanel.add(transposeLabel);
 		transposePanel.add(transposeUpButton);
@@ -135,42 +119,42 @@ public class MidiRouter extends JFrame {
 		transposePanel.add(octaveUpButton);
 		transposePanel.add(octaveDownButton);
 
-		transposeUpButton.addActionListener(new ActionListener() {
-			@Override
-			public void actionPerformed(ActionEvent e) {
-				transposingReceiver.setTransposeValue(transposingReceiver.getTransposeValue() + 1);
-				updateTransposeLabel();
+		// Action listeners
+		toggleButton.addActionListener(e -> {
+			if (isRunning) {
+				stopMidiRouting();
+				toggleButton.setText("Start");
+			} else {
+				startMidiRouting();
+				toggleButton.setText("Stop");
 			}
+			isRunning = !isRunning;
 		});
 
-		transposeDownButton.addActionListener(new ActionListener() {
-			@Override
-			public void actionPerformed(ActionEvent e) {
-				transposingReceiver.setTransposeValue(transposingReceiver.getTransposeValue() - 1);
-				updateTransposeLabel();
-			}
+		transposeUpButton.addActionListener(e -> {
+			transposingReceiver.setTransposeValue(transposingReceiver.getTransposeValue() + 1);
+			updateTransposeLabel();
 		});
 
-		octaveUpButton.addActionListener(new ActionListener() {
-			@Override
-			public void actionPerformed(ActionEvent e) {
-				transposingReceiver.setOctaveShift(transposingReceiver.getOctaveShift() + 1);
-				updateOctaveShiftLabel();
-			}
+		transposeDownButton.addActionListener(e -> {
+			transposingReceiver.setTransposeValue(transposingReceiver.getTransposeValue() - 1);
+			updateTransposeLabel();
 		});
 
-		octaveDownButton.addActionListener(new ActionListener() {
-			@Override
-			public void actionPerformed(ActionEvent e) {
-				transposingReceiver.setOctaveShift(transposingReceiver.getOctaveShift() - 1);
-				updateOctaveShiftLabel();
-			}
+		octaveUpButton.addActionListener(e -> {
+			transposingReceiver.setOctaveShift(transposingReceiver.getOctaveShift() + 1);
+			updateOctaveShiftLabel();
+		});
+
+		octaveDownButton.addActionListener(e -> {
+			transposingReceiver.setOctaveShift(transposingReceiver.getOctaveShift() - 1);
+			updateOctaveShiftLabel();
 		});
 
 		mainPanel.add(inputOutputPanel);
-		mainPanel.add(buttonPanel);
 		mainPanel.add(transposePanel);
-
+		mainPanel.add(buttonPanel);
+		
 		getContentPane().add(mainPanel);
 		setLocationRelativeTo(null);
 	}
@@ -185,35 +169,19 @@ public class MidiRouter extends JFrame {
 				inputDevice = MidiSystem.getMidiDevice(inputDeviceInfo);
 				outputDevice1 = MidiSystem.getMidiDevice(outputDeviceInfo1);
 				outputDevice2 = MidiSystem.getMidiDevice(outputDeviceInfo2);
-			} catch (MidiUnavailableException e1) {
-				e1.printStackTrace();
-			}
 
-			try {
 				inputDevice.open();
 				outputDevice1.open();
 				outputDevice2.open();
 
-				// Create receivers for each output device
-				Receiver outputReceiver1 = outputDevice1.getReceiver();
-				Receiver outputReceiver2 = outputDevice2.getReceiver();
-
-				// Create a list of output receivers
-				List<Receiver> outputDelegates = new ArrayList<>();
-				outputDelegates.add(outputReceiver1);
-				outputDelegates.add(outputReceiver2);
-
-				// Use MultiOutputReceiver to route MIDI to both output devices
-				transposingReceiver = new TransposingReceiver(outputDelegates);
-
-				Transmitter transmitter = inputDevice.getTransmitter();
-				transmitter.setReceiver(transposingReceiver);
+				transposingReceiver.setDelegates(List.of(outputDevice1.getReceiver(), outputDevice2.getReceiver()));
+				inputDevice.getTransmitter().setReceiver(transposingReceiver);
 
 				System.out.println("MIDI Routing started.");
 			} catch (MidiUnavailableException ex) {
 				ex.printStackTrace();
-				JOptionPane.showMessageDialog(MidiRouter.this, "Error opening MIDI devices: " + ex.getMessage(),
-						"Error", JOptionPane.ERROR_MESSAGE);
+				JOptionPane.showMessageDialog(this, "Error opening MIDI devices: " + ex.getMessage(), "Error",
+						JOptionPane.ERROR_MESSAGE);
 			}
 		}
 	}
@@ -222,11 +190,9 @@ public class MidiRouter extends JFrame {
 		if (inputDevice != null && inputDevice.isOpen()) {
 			inputDevice.close();
 		}
-
 		if (outputDevice1 != null && outputDevice1.isOpen()) {
 			outputDevice1.close();
 		}
-
 		if (outputDevice2 != null && outputDevice2.isOpen()) {
 			outputDevice2.close();
 		}
@@ -246,11 +212,35 @@ public class MidiRouter extends JFrame {
 		octaveShiftLabel.setText("Octave Shift: " + transposingReceiver.getOctaveShift());
 	}
 
-	class FilteringReceiver implements Receiver {
-		private Receiver delegate;
+	static class TransposingReceiver implements Receiver {
+		private int transposeValue = 0;
+		private int octaveShift = 0;
+		private MultiOutputReceiver multiOutputReceiver;
 
-		public FilteringReceiver(Receiver delegate) {
-			this.delegate = delegate;
+		public TransposingReceiver(List<Receiver> outputDelegates) {
+			multiOutputReceiver = new MultiOutputReceiver(outputDelegates);
+		}
+
+		public void setTransposeValue(int transposeValue) {
+			// Ensure transposeValue stays within the range of -12 to +12
+			this.transposeValue = Math.max(-12, Math.min(12, transposeValue));
+		}
+
+		public int getTransposeValue() {
+			return transposeValue;
+		}
+
+		public void setOctaveShift(int octaveShift) {
+			// Ensure octaveShift stays within the range of -7 to +7
+			this.octaveShift = Math.max(-7, Math.min(7, octaveShift));
+		}
+
+		public int getOctaveShift() {
+			return octaveShift;
+		}
+
+		public void setDelegates(List<Receiver> delegates) {
+			multiOutputReceiver.setDelegates(delegates);
 		}
 
 		@Override
@@ -258,26 +248,43 @@ public class MidiRouter extends JFrame {
 			if (message instanceof ShortMessage) {
 				ShortMessage shortMessage = (ShortMessage) message;
 				int command = shortMessage.getCommand();
-				if (command == ShortMessage.NOTE_ON || command == ShortMessage.NOTE_OFF
-						|| (command == ShortMessage.CONTROL_CHANGE)) {
-					delegate.send(message, timeStamp);
+
+				if (command == ShortMessage.NOTE_ON || command == ShortMessage.NOTE_OFF) {
+					int originalData = shortMessage.getData1();
+					int transposedData = (originalData + transposeValue + (octaveShift * 12)) % 128;
+
+					try {
+						ShortMessage transposedMessage = new ShortMessage(command, shortMessage.getChannel(),
+								transposedData, shortMessage.getData2());
+						multiOutputReceiver.send(transposedMessage, timeStamp);
+					} catch (InvalidMidiDataException e) {
+						e.printStackTrace();
+					}
+				} else if (command == ShortMessage.CONTROL_CHANGE) {
+					// Forward Control Change (CC) messages unchanged
+					multiOutputReceiver.send(shortMessage, timeStamp);
 				}
-			} else {
-				delegate.send(message, timeStamp);
 			}
 		}
 
 		@Override
 		public void close() {
-			delegate.close();
+			multiOutputReceiver.close();
 		}
 	}
 
-	class MultiOutputReceiver implements Receiver {
-		private List<Receiver> delegates;
+	static class MultiOutputReceiver implements Receiver {
+		private List<Receiver> delegates = new ArrayList<>();
 
 		public MultiOutputReceiver(List<Receiver> delegates) {
-			this.delegates = delegates;
+			if (delegates != null) {
+				this.delegates.addAll(delegates);
+			}
+		}
+
+		public void setDelegates(List<Receiver> delegates) {
+			this.delegates.clear();
+			this.delegates.addAll(delegates);
 		}
 
 		@Override
@@ -292,66 +299,7 @@ public class MidiRouter extends JFrame {
 			for (Receiver delegate : delegates) {
 				delegate.close();
 			}
+			delegates.clear();
 		}
-	}
-
-	class TransposingReceiver extends FilteringReceiver {
-		private int transposeValue = 0;
-		private int octaveShift = 0;
-		private MultiOutputReceiver multiOutputReceiver;
-
-		public TransposingReceiver(List<Receiver> outputDelegates) {
-			super(null); // No need to delegate to a single receiver
-			multiOutputReceiver = new MultiOutputReceiver(outputDelegates);
-		}
-
-		public void setTransposeValue(int transposeValue) {
-			this.transposeValue = transposeValue;
-		}
-
-		public int getTransposeValue() {
-			return transposeValue;
-		}
-
-		public void setOctaveShift(int octaveShift) {
-			this.octaveShift = octaveShift;
-		}
-
-		public int getOctaveShift() {
-			return octaveShift;
-		}
-
-		@Override
-		public void send(MidiMessage message, long timeStamp) {
-			if (message instanceof ShortMessage) {
-				ShortMessage shortMessage = (ShortMessage) message;
-				int command = shortMessage.getCommand();
-
-				if (command == ShortMessage.NOTE_ON || command == ShortMessage.NOTE_OFF) {
-					int originalData = shortMessage.getData1();
-					int transposedData = originalData + transposeValue;
-					int transposedOctave = (transposedData / 12) - 1;
-
-					transposedOctave += octaveShift;
-
-					transposedData = Math.max(0, Math.min(127, transposedData));
-
-					transposedData = (transposedOctave + 1) * 12 + (transposedData % 12);
-
-					try {
-						ShortMessage transposedMessage = new ShortMessage(command, shortMessage.getChannel(),
-								transposedData, shortMessage.getData2());
-						multiOutputReceiver.send(transposedMessage, timeStamp);
-					} catch (InvalidMidiDataException e) {
-						e.printStackTrace();
-					}
-				} else {
-					multiOutputReceiver.send(message, timeStamp);
-				}
-			} else {
-				multiOutputReceiver.send(message, timeStamp);
-			}
-		}
-
 	}
 }
