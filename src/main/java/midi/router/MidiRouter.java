@@ -3,7 +3,7 @@ package midi.router;
 import java.awt.EventQueue;
 import java.awt.FlowLayout;
 import java.awt.GridLayout;
-import java.util.ArrayList;	
+import java.util.ArrayList;
 import java.util.List;
 
 import javax.swing.ImageIcon;
@@ -13,6 +13,7 @@ import javax.swing.JComboBox;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
+import javax.swing.JToggleButton;
 import javax.swing.UIManager;
 import javax.swing.UnsupportedLookAndFeelException;
 
@@ -35,6 +36,8 @@ public class MidiRouter extends JFrame {
 	private TransposingReceiver transposingReceiver;
 	private JLabel transposeLabel, octaveShiftLabel;
 
+	private boolean singleOut = false;
+
 	public static void main(String[] args) {
 		EventQueue.invokeLater(() -> {
 			try {
@@ -49,7 +52,7 @@ public class MidiRouter extends JFrame {
 
 	public MidiRouter() throws MidiUnavailableException {
 		setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-		setSize(395, 235);
+		setSize(410, 235);
 		setTitle("MIDI Router - Transpose & Octave Shift");
 		setIconImage(new ImageIcon(getClass().getResource("/logo.png")).getImage());
 
@@ -85,15 +88,18 @@ public class MidiRouter extends JFrame {
 	private void initComponents() {
 		JPanel mainPanel = new JPanel(new GridLayout(3, 1));
 		JPanel inputOutputPanel = new JPanel(new GridLayout(3, 1));
-		
+
 		FlowLayout fl_buttonPanel = new FlowLayout(FlowLayout.CENTER);
 		fl_buttonPanel.setVgap(20);
 		JPanel buttonPanel = new JPanel(fl_buttonPanel);
-		
+
 		JButton toggleButton = new JButton("Start");
 		FlowLayout fl_transposePanel = new FlowLayout(FlowLayout.CENTER);
 		fl_transposePanel.setVgap(20);
 		JPanel transposePanel = new JPanel(fl_transposePanel);
+
+		JToggleButton singleMIDIOutputOnly = new JToggleButton("Single MIDI Out");
+
 		JButton transposeDownButton = new JButton("-");
 		JButton transposeUpButton = new JButton("+");
 		JButton octaveDownButton = new JButton("↓");
@@ -112,12 +118,24 @@ public class MidiRouter extends JFrame {
 
 		buttonPanel.add(toggleButton);
 
+		transposePanel.add(singleMIDIOutputOnly);
+
 		transposePanel.add(transposeLabel);
 		transposePanel.add(transposeUpButton);
 		transposePanel.add(transposeDownButton);
 		transposePanel.add(octaveShiftLabel);
 		transposePanel.add(octaveUpButton);
 		transposePanel.add(octaveDownButton);
+
+		outputDeviceDropdown1
+				.addActionListener(e -> handleDeviceSelection(outputDeviceDropdown1, outputDeviceDropdown2));
+		outputDeviceDropdown2
+				.addActionListener(e -> handleDeviceSelection(outputDeviceDropdown2, outputDeviceDropdown1));
+
+		singleMIDIOutputOnly.addActionListener(e -> {
+			singleOut = singleMIDIOutputOnly.isSelected();
+			outputDeviceDropdown2.setEnabled(!singleOut);
+		});
 
 		// Action listeners
 		toggleButton.addActionListener(e -> {
@@ -154,9 +172,18 @@ public class MidiRouter extends JFrame {
 		mainPanel.add(inputOutputPanel);
 		mainPanel.add(transposePanel);
 		mainPanel.add(buttonPanel);
-		
+
 		getContentPane().add(mainPanel);
 		setLocationRelativeTo(null);
+	}
+
+	private void handleDeviceSelection(JComboBox<MidiDevice.Info> selectedDropdown,
+			JComboBox<MidiDevice.Info> otherDropdown) {
+		// Avoid redundant action when updating programmatically
+		if (selectedDropdown.getSelectedIndex() == otherDropdown.getSelectedIndex()
+				&& otherDropdown.getSelectedIndex() != -1) {
+			otherDropdown.setSelectedIndex(-1);
+		}
 	}
 
 	private void startMidiRouting() {
@@ -174,7 +201,14 @@ public class MidiRouter extends JFrame {
 				outputDevice1.open();
 				outputDevice2.open();
 
-				transposingReceiver.setDelegates(List.of(outputDevice1.getReceiver(), outputDevice2.getReceiver()));
+				List<Receiver> receivers = new ArrayList<>();
+				receivers.add(outputDevice1.getReceiver());
+				if (!singleOut) {
+					receivers.add(outputDevice2.getReceiver());
+				}
+
+				transposingReceiver.setDelegates(receivers);
+				transposingReceiver.setSingleOut(singleOut);
 				inputDevice.getTransmitter().setReceiver(transposingReceiver);
 
 				System.out.println("MIDI Routing started.");
@@ -216,13 +250,15 @@ public class MidiRouter extends JFrame {
 		private int transposeValue = 0;
 		private int octaveShift = 0;
 		private MultiOutputReceiver multiOutputReceiver;
+		private boolean singleOut = false;
+
+		private ShortMessage transposedMessage = new ShortMessage();
 
 		public TransposingReceiver(List<Receiver> outputDelegates) {
 			multiOutputReceiver = new MultiOutputReceiver(outputDelegates);
 		}
 
 		public void setTransposeValue(int transposeValue) {
-			// Ensure transposeValue stays within the range of -12 to +12
 			this.transposeValue = Math.max(-12, Math.min(12, transposeValue));
 		}
 
@@ -231,7 +267,6 @@ public class MidiRouter extends JFrame {
 		}
 
 		public void setOctaveShift(int octaveShift) {
-			// Ensure octaveShift stays within the range of -7 to +7
 			this.octaveShift = Math.max(-7, Math.min(7, octaveShift));
 		}
 
@@ -241,6 +276,10 @@ public class MidiRouter extends JFrame {
 
 		public void setDelegates(List<Receiver> delegates) {
 			multiOutputReceiver.setDelegates(delegates);
+		}
+
+		public void setSingleOut(boolean singleOut) {
+			this.singleOut = singleOut;
 		}
 
 		@Override
@@ -254,9 +293,17 @@ public class MidiRouter extends JFrame {
 					int transposedData = (originalData + transposeValue + (octaveShift * 12)) % 128;
 
 					try {
-						ShortMessage transposedMessage = new ShortMessage(command, shortMessage.getChannel(),
-								transposedData, shortMessage.getData2());
-						multiOutputReceiver.send(transposedMessage, timeStamp);
+						transposedMessage.setMessage(command, shortMessage.getChannel(), transposedData,
+								shortMessage.getData2());
+
+						if (singleOut) {
+							if (multiOutputReceiver.getDelegates().size() > 0) {
+								// Send only to the first receiver if singleOut is true
+								multiOutputReceiver.getDelegates().get(0).send(transposedMessage, timeStamp);
+							}
+						} else {
+							multiOutputReceiver.send(transposedMessage, timeStamp);
+						}
 					} catch (InvalidMidiDataException e) {
 						e.printStackTrace();
 					}
@@ -274,7 +321,7 @@ public class MidiRouter extends JFrame {
 	}
 
 	static class MultiOutputReceiver implements Receiver {
-		private List<Receiver> delegates = new ArrayList<>();
+		private List<Receiver> delegates = new ArrayList<>(10);
 
 		public MultiOutputReceiver(List<Receiver> delegates) {
 			if (delegates != null) {
@@ -284,7 +331,13 @@ public class MidiRouter extends JFrame {
 
 		public void setDelegates(List<Receiver> delegates) {
 			this.delegates.clear();
-			this.delegates.addAll(delegates);
+			if (delegates != null) {
+				this.delegates.addAll(delegates);
+			}
+		}
+
+		public List<Receiver> getDelegates() {
+			return delegates;
 		}
 
 		@Override
@@ -302,4 +355,5 @@ public class MidiRouter extends JFrame {
 			delegates.clear();
 		}
 	}
+
 }
