@@ -1,359 +1,410 @@
 package midi.router;
 
-import java.awt.EventQueue;
-import java.awt.FlowLayout;
-import java.awt.GridLayout;
-import java.util.ArrayList;
+import javax.sound.midi.*;
+import javax.swing.*;
+import java.awt.*;
+import java.awt.event.*;
+import java.awt.geom.Line2D;
+import java.awt.geom.Point2D;
+import java.awt.geom.RoundRectangle2D;
+import java.util.*;
 import java.util.List;
-
-import javax.swing.ImageIcon;
-import javax.swing.JOptionPane;
-import javax.swing.JButton;
-import javax.swing.JComboBox;
-import javax.swing.JFrame;
-import javax.swing.JLabel;
-import javax.swing.JPanel;
-import javax.swing.JToggleButton;
-import javax.swing.UIManager;
-import javax.swing.UnsupportedLookAndFeelException;
-
-import com.formdev.flatlaf.FlatDarkLaf;
-
-import javax.sound.midi.InvalidMidiDataException;
-import javax.sound.midi.MidiDevice;
-import javax.sound.midi.MidiMessage;
-import javax.sound.midi.MidiSystem;
-import javax.sound.midi.MidiUnavailableException;
-import javax.sound.midi.Receiver;
-import javax.sound.midi.ShortMessage;
 
 @SuppressWarnings("serial")
 public class MidiRouter extends JFrame {
+	private DrawingPanel drawingPanel;
 
-	private boolean isRunning = false;
-	private MidiDevice inputDevice, outputDevice1, outputDevice2;
-	private JComboBox<MidiDevice.Info> inputDeviceDropdown, outputDeviceDropdown1, outputDeviceDropdown2;
-	private TransposingReceiver transposingReceiver;
-	private JLabel transposeLabel, octaveShiftLabel;
+	public MidiRouter() {
+		setTitle("MIDI Router");
+		setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+		setSize(1024, 768);
+		setLocationRelativeTo(null);
+		getContentPane().setBackground(new Color(40, 42, 47)); // Updated background color
+		setResizable(false); // Allow resizing the window
 
-	private boolean singleOut = false;
+		drawingPanel = new DrawingPanel();
+		JScrollPane scrollPane = new JScrollPane(drawingPanel);
+		scrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+		scrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_NEVER);
 
-	public static void main(String[] args) {
-		EventQueue.invokeLater(() -> {
+		add(scrollPane);
+
+		scrollPane.addMouseWheelListener(new MouseWheelListener() {
+			@Override
+			public void mouseWheelMoved(MouseWheelEvent e) {
+				JScrollBar vertical = scrollPane.getVerticalScrollBar();
+				int scrollAmount = e.getUnitsToScroll() * 10; // Change 5 to increase/decrease the speed
+				vertical.setValue(vertical.getValue() + scrollAmount);
+			}
+		});
+	}
+
+	private class DrawingPanel extends JPanel {
+		private List<Node> inNodes = new ArrayList<>();
+		private List<Node> outNodes = new ArrayList<>();
+		private Point startPoint;
+		private Point currentPoint;
+		private Point endPoint;
+		private boolean isDrawing;
+		private List<Point> connectionCenters = new ArrayList<>();
+		private List<Line2D> connections = new ArrayList<>();
+		private Map<Node, List<Node>> nodeConnections = new HashMap<>();
+		private Node currentInNode;
+		private List<MidiDevice> inputDevices = new ArrayList<>();
+		private List<MidiDevice> outputDevices = new ArrayList<>();
+
+		private Map<Node, Map<Node, ConnectionInfo>> activeConnections = new HashMap<>();
+
+		private class ConnectionInfo {
+			Transmitter transmitter;
+			Receiver receiver;
+
+			public ConnectionInfo(Transmitter transmitter, Receiver receiver) {
+				this.transmitter = transmitter;
+				this.receiver = receiver;
+			}
+
+			public void close() {
+				if (transmitter != null) {
+					transmitter.close();
+				}
+				if (receiver != null) {
+					receiver.close();
+				}
+			}
+		}
+
+		public DrawingPanel() {
+			setBackground(new Color(40, 42, 47)); // Lighter background for better visibility
+			setupMidiDevices();
+			setupMouseListeners();
+		}
+
+		@Override
+		public Dimension getPreferredSize() {
+			int maxY = Math.max(inNodes.size(), outNodes.size()) * 120 + 100; // Calculate the required height
+			return new Dimension(getWidth(), maxY); // The width is already fixed, so we adjust height only
+		}
+
+		private void setupMidiDevices() {
 			try {
-				UIManager.setLookAndFeel(new FlatDarkLaf());
-				MidiRouter frame = new MidiRouter();
-				frame.setVisible(true);
-			} catch (UnsupportedLookAndFeelException | MidiUnavailableException e) {
+				MidiDevice.Info[] infos = MidiSystem.getMidiDeviceInfo();
+				int inY = 150;
+				int outY = 150;
+
+				for (MidiDevice.Info info : infos) {
+					try {
+						MidiDevice device = MidiSystem.getMidiDevice(info);
+						String deviceName = info.getName();
+
+						// Skip some common internal devices
+						if (deviceName.contains("Real Time Sequencer") || deviceName.contains("Gervill")
+								|| deviceName.contains("Java Sound Synthesizer")) {
+							continue;
+						}
+
+						// For input devices (Transmitters)
+						if (device.getMaxTransmitters() != 0) {
+							inputDevices.add(device);
+							createNode("IN: " + truncateName(deviceName), 200, inY);
+							inY += 120;
+						}
+
+						// For output devices (Receivers)
+						if (device.getMaxReceivers() != 0) {
+							outputDevices.add(device);
+							createNode("OUT: " + truncateName(deviceName), 800, outY);
+							outY += 120;
+						}
+
+						device.close();
+					} catch (MidiUnavailableException e) {
+						System.err.println("Error with device: " + info.getName());
+					}
+				}
+
+				// If no devices were found, create some dummy devices for testing
+				if (inNodes.isEmpty()) {
+					createNode("IN: No MIDI Inputs", 200, 150);
+				}
+				if (outNodes.isEmpty()) {
+					createNode("OUT: No MIDI Outputs", 800, 150);
+				}
+
+			} catch (Exception e) {
+				e.printStackTrace();
+				// Create dummy devices if MIDI system is unavailable
+				createNode("IN: Error Loading MIDI", 200, 150);
+				createNode("OUT: Error Loading MIDI", 800, 150);
+			}
+		}
+
+		private void setupMouseListeners() {
+			addMouseListener(new MouseAdapter() {
+				@Override
+				public void mousePressed(MouseEvent e) {
+					// Check for connection removal first
+					for (int i = 0; i < connectionCenters.size(); i++) {
+						if (isClickedOnConnectionCenter(e.getPoint(), connectionCenters.get(i))) {
+							Line2D connection = connections.get(i);
+							Node inNode = findNodeByPoint(connection.getP1());
+							Node outNode = findNodeByPoint(connection.getP2());
+
+							if (inNode != null && outNode != null) {
+								nodeConnections.get(inNode).remove(outNode);
+								stopMidiRouting(inNode, outNode); // Close devices when disconnected
+							}
+
+							connectionCenters.remove(i);
+							connections.remove(i);
+							repaint();
+							return;
+						}
+					}
+
+					// Check for starting new connection from input node
+					for (Node node : inNodes) {
+						if (node.contains(e.getPoint())) {
+							currentInNode = node;
+							startPoint = new Point(node.getX() + 100, node.getY());
+							currentPoint = e.getPoint();
+							isDrawing = true;
+							break;
+						}
+					}
+				}
+
+				@Override
+				public void mouseReleased(MouseEvent e) {
+					if (isDrawing && currentInNode != null) {
+						for (Node node : outNodes) {
+							if (node.contains(e.getPoint())) {
+								endPoint = new Point(node.getX() - 100, node.getY());
+								if (!isConnectionExists(currentInNode, node)) {
+									connections.add(new Line2D.Double(startPoint, endPoint));
+									connectionCenters.add(new Point((startPoint.x + endPoint.x) / 2,
+											(startPoint.y + endPoint.y) / 2));
+									nodeConnections.computeIfAbsent(currentInNode, k -> new ArrayList<>()).add(node);
+									startMidiRouting(currentInNode, node); // Start routing when a connection is
+																			// made
+								}
+								break;
+							}
+						}
+						isDrawing = false;
+						repaint();
+					}
+				}
+			});
+
+			addMouseMotionListener(new MouseMotionAdapter() {
+				@Override
+				public void mouseDragged(MouseEvent e) {
+					if (isDrawing) {
+						currentPoint = e.getPoint();
+						repaint();
+					}
+				}
+			});
+		}
+
+		private boolean isClickedOnConnectionCenter(Point clickPoint, Point connectionCenter) {
+			return Math.abs(clickPoint.x - connectionCenter.x) < 10 && Math.abs(clickPoint.y - connectionCenter.y) < 10;
+		}
+
+		private boolean isConnectionExists(Node inNode, Node outNode) {
+			List<Node> connectedOutNodes = nodeConnections.get(inNode);
+			return connectedOutNodes != null && connectedOutNodes.contains(outNode);
+		}
+
+		private Node findNodeByPoint(Point2D point) {
+			for (Node node : inNodes) {
+				if (Math.abs(node.getX() + 100 - point.getX()) < 5 && Math.abs(node.getY() - point.getY()) < 5) {
+					return node;
+				}
+			}
+			for (Node node : outNodes) {
+				if (Math.abs(node.getX() - 100 - point.getX()) < 5 && Math.abs(node.getY() - point.getY()) < 5) {
+					return node;
+				}
+			}
+			return null;
+		}
+
+		private String truncateName(String name) {
+			return name.length() > 24 ? name.substring(0, 17) + "..." : name;
+		}
+
+		private void createNode(String type, int x, int y) {
+			Node node = new Node(x, y, type);
+			if (type.startsWith("IN:")) {
+				inNodes.add(node);
+				nodeConnections.put(node, new ArrayList<>());
+			} else {
+				outNodes.add(node);
+			}
+		}
+
+		private void startMidiRouting(Node inNode, Node outNode) {
+			int inIndex = inNodes.indexOf(inNode);
+			int outIndex = outNodes.indexOf(outNode);
+
+			if (inIndex < 0 || outIndex < 0 || inIndex >= inputDevices.size() || outIndex >= outputDevices.size()) {
+				return;
+			}
+
+			MidiDevice inputDevice = inputDevices.get(inIndex);
+			MidiDevice outputDevice = outputDevices.get(outIndex);
+
+			try {
+				// Close existing connections if any
+				Map<Node, ConnectionInfo> connections = activeConnections.get(inNode);
+				if (connections != null && connections.containsKey(outNode)) {
+					ConnectionInfo oldConnection = connections.get(outNode);
+					oldConnection.close();
+					connections.remove(outNode);
+				}
+
+				// Reopen devices if they were closed
+				if (!inputDevice.isOpen()) {
+					inputDevice.open();
+				}
+				if (!outputDevice.isOpen()) {
+					outputDevice.open();
+				}
+
+				// Create new connection
+				Transmitter transmitter = inputDevice.getTransmitter();
+				Receiver receiver = outputDevice.getReceiver();
+				transmitter.setReceiver(receiver);
+
+				// Store the new connection info
+				activeConnections.computeIfAbsent(inNode, k -> new HashMap<>()).put(outNode,
+						new ConnectionInfo(transmitter, receiver));
+
+			} catch (MidiUnavailableException e) {
+				// Show error dialog when MIDI device is unavailable or busy
+				JOptionPane.showMessageDialog(this, // Parent component (the JFrame)
+						"Failed to route MIDI device. The device may be busy or unavailable.", "MIDI Routing Error",
+						JOptionPane.ERROR_MESSAGE);
 				e.printStackTrace();
 			}
-		});
-	}
-
-	public MidiRouter() throws MidiUnavailableException {
-		setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-		setSize(410, 235);
-		setTitle("MIDI Router - Transpose & Octave Shift");
-		setIconImage(new ImageIcon(getClass().getResource("/logo.png")).getImage());
-
-		initMidi();
-		initComponents();
-	}
-
-	private void initMidi() throws MidiUnavailableException {
-		MidiDevice.Info[] infos = MidiSystem.getMidiDeviceInfo();
-		List<MidiDevice.Info> inputDevices = new ArrayList<>();
-		List<MidiDevice.Info> outputDevices = new ArrayList<>();
-
-		for (MidiDevice.Info info : infos) {
-			MidiDevice device = MidiSystem.getMidiDevice(info);
-			if (device.getMaxTransmitters() != 0) {
-				inputDevices.add(info);
-			}
-			if (device.getMaxReceivers() != 0) {
-				outputDevices.add(info);
-			}
 		}
 
-		if (inputDevices.isEmpty() || outputDevices.isEmpty()) {
-			throw new MidiUnavailableException("No MIDI input or output devices found");
+		private void stopMidiRouting(Node inNode, Node outNode) {
+			Map<Node, ConnectionInfo> connections = activeConnections.get(inNode);
+			if (connections != null) {
+				ConnectionInfo connection = connections.remove(outNode);
+				if (connection != null) {
+					connection.close();
+				}
+
+				// If no more connections for this input node, remove it from the map
+				if (connections.isEmpty()) {
+					activeConnections.remove(inNode);
+				}
+			}
+
 		}
 
-		inputDeviceDropdown = new JComboBox<>(inputDevices.toArray(new MidiDevice.Info[0]));
-		outputDeviceDropdown1 = new JComboBox<>(outputDevices.toArray(new MidiDevice.Info[0]));
-		outputDeviceDropdown2 = new JComboBox<>(outputDevices.toArray(new MidiDevice.Info[0]));
-		transposingReceiver = new TransposingReceiver(null); // delegate will be set later
+		@Override
+		protected void paintComponent(Graphics g) {
+			super.paintComponent(g);
+			Graphics2D g2d = (Graphics2D) g;
+			g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+			g2d.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+
+			// Draw title and headers
+			g2d.setColor(new Color(255, 255, 255)); // Lighter text for visibility
+			g2d.setFont(new Font("Arial", Font.BOLD, 30));
+			g2d.drawString("MIDI Router", 20, 40);
+
+			g2d.setFont(new Font("Arial", Font.BOLD, 18));
+			g2d.drawString("Input Devices", 20, 80);
+			g2d.drawString("Output Devices", getWidth() - 180, 80);
+
+			// Draw connections
+			for (int i = 0; i < connections.size(); i++) {
+				Line2D connection = connections.get(i);
+				g2d.setColor(new Color(0, 204, 255, 150)); // Lighter blue for connections
+				g2d.setStroke(new BasicStroke(3, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+				g2d.draw(connection);
+
+				Point center = connectionCenters.get(i);
+				g2d.setColor(new Color(255, 255, 255));
+				g2d.fillOval(center.x - 5, center.y - 5, 10, 10);
+				g2d.setColor(new Color(0, 150, 255));
+				g2d.drawOval(center.x - 5, center.y - 5, 10, 10);
+			}
+
+			// Draw active connection
+			if (isDrawing && startPoint != null && currentPoint != null) {
+				g2d.setColor(new Color(0, 204, 255, 150)); // Lighter blue for active connections
+				g2d.setStroke(new BasicStroke(3, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+				g2d.drawLine(startPoint.x, startPoint.y, currentPoint.x, currentPoint.y);
+			}
+
+			// Draw nodes
+			for (Node node : inNodes) {
+				node.draw(g2d);
+			}
+			for (Node node : outNodes) {
+				node.draw(g2d);
+			}
+		}
 	}
 
-	private void initComponents() {
-		JPanel mainPanel = new JPanel(new GridLayout(3, 1));
-		JPanel inputOutputPanel = new JPanel(new GridLayout(3, 1));
+	private class Node {
+		private int x, y;
+		private String type;
+		private static final int WIDTH = 200;
+		private static final int HEIGHT = 40;
 
-		FlowLayout fl_buttonPanel = new FlowLayout(FlowLayout.CENTER);
-		fl_buttonPanel.setVgap(20);
-		JPanel buttonPanel = new JPanel(fl_buttonPanel);
+		public Node(int x, int y, String type) {
+			this.x = x;
+			this.y = y;
+			this.type = type;
+		}
 
-		JButton toggleButton = new JButton("Start");
-		FlowLayout fl_transposePanel = new FlowLayout(FlowLayout.CENTER);
-		fl_transposePanel.setVgap(20);
-		JPanel transposePanel = new JPanel(fl_transposePanel);
+		public void draw(Graphics2D g2d) {
+			// Draw node background
+			g2d.setColor(new Color(45, 48, 56)); // Dark background for nodes
+			RoundRectangle2D.Float rect = new RoundRectangle2D.Float(x - WIDTH / 2, y - HEIGHT / 2, WIDTH, HEIGHT, 10,
+					10);
+			g2d.fill(rect);
 
-		JToggleButton singleMIDIOutputOnly = new JToggleButton("Single MIDI Out");
+			// Draw border
+			g2d.setColor(new Color(70, 73, 82));
+			g2d.draw(rect);
 
-		JButton transposeDownButton = new JButton("-");
-		JButton transposeUpButton = new JButton("+");
-		JButton octaveDownButton = new JButton("↓");
-		JButton octaveUpButton = new JButton("↑");
+			// Draw text
+			g2d.setFont(new Font("Arial", Font.PLAIN, 12));
+			FontMetrics fm = g2d.getFontMetrics();
+			g2d.setColor(new Color(200, 200, 200));
+			int textX = x - fm.stringWidth(type) / 2;
+			int textY = y + fm.getHeight() / 3;
+			g2d.drawString(type, textX, textY);
 
-		transposeLabel = new JLabel("Transpose: 0");
-		octaveShiftLabel = new JLabel("Octave Shift: 0");
-
-		// Add components to panels
-		inputOutputPanel.add(new JLabel("MIDI Input:"));
-		inputOutputPanel.add(inputDeviceDropdown);
-		inputOutputPanel.add(new JLabel("MIDI Output 1:"));
-		inputOutputPanel.add(outputDeviceDropdown1);
-		inputOutputPanel.add(new JLabel("MIDI Output 2:"));
-		inputOutputPanel.add(outputDeviceDropdown2);
-
-		buttonPanel.add(toggleButton);
-
-		transposePanel.add(singleMIDIOutputOnly);
-
-		transposePanel.add(transposeLabel);
-		transposePanel.add(transposeUpButton);
-		transposePanel.add(transposeDownButton);
-		transposePanel.add(octaveShiftLabel);
-		transposePanel.add(octaveUpButton);
-		transposePanel.add(octaveDownButton);
-
-		outputDeviceDropdown1
-				.addActionListener(e -> handleDeviceSelection(outputDeviceDropdown1, outputDeviceDropdown2));
-		outputDeviceDropdown2
-				.addActionListener(e -> handleDeviceSelection(outputDeviceDropdown2, outputDeviceDropdown1));
-
-		singleMIDIOutputOnly.addActionListener(e -> {
-			singleOut = singleMIDIOutputOnly.isSelected();
-			outputDeviceDropdown2.setEnabled(!singleOut);
-		});
-
-		// Action listeners
-		toggleButton.addActionListener(e -> {
-			if (isRunning) {
-				stopMidiRouting();
-				toggleButton.setText("Start");
+			// Draw connection point
+			if (type.startsWith("IN:")) {
+				g2d.setColor(new Color(0, 150, 255)); // Blue for input nodes
+				g2d.fillOval(x + WIDTH / 2 - 5, y - 5, 10, 10);
 			} else {
-				startMidiRouting();
-				toggleButton.setText("Stop");
-			}
-			isRunning = !isRunning;
-		});
-
-		transposeUpButton.addActionListener(e -> {
-			transposingReceiver.setTransposeValue(transposingReceiver.getTransposeValue() + 1);
-			updateTransposeLabel();
-		});
-
-		transposeDownButton.addActionListener(e -> {
-			transposingReceiver.setTransposeValue(transposingReceiver.getTransposeValue() - 1);
-			updateTransposeLabel();
-		});
-
-		octaveUpButton.addActionListener(e -> {
-			transposingReceiver.setOctaveShift(transposingReceiver.getOctaveShift() + 1);
-			updateOctaveShiftLabel();
-		});
-
-		octaveDownButton.addActionListener(e -> {
-			transposingReceiver.setOctaveShift(transposingReceiver.getOctaveShift() - 1);
-			updateOctaveShiftLabel();
-		});
-
-		mainPanel.add(inputOutputPanel);
-		mainPanel.add(transposePanel);
-		mainPanel.add(buttonPanel);
-
-		getContentPane().add(mainPanel);
-		setLocationRelativeTo(null);
-	}
-
-	private void handleDeviceSelection(JComboBox<MidiDevice.Info> selectedDropdown,
-			JComboBox<MidiDevice.Info> otherDropdown) {
-		// Avoid redundant action when updating programmatically
-		if (selectedDropdown.getSelectedIndex() == otherDropdown.getSelectedIndex()
-				&& otherDropdown.getSelectedIndex() != -1) {
-			otherDropdown.setSelectedIndex(-1);
-		}
-	}
-
-	private void startMidiRouting() {
-		if (inputDevice == null || outputDevice1 == null || outputDevice2 == null) {
-			MidiDevice.Info inputDeviceInfo = (MidiDevice.Info) inputDeviceDropdown.getSelectedItem();
-			MidiDevice.Info outputDeviceInfo1 = (MidiDevice.Info) outputDeviceDropdown1.getSelectedItem();
-			MidiDevice.Info outputDeviceInfo2 = (MidiDevice.Info) outputDeviceDropdown2.getSelectedItem();
-
-			try {
-				inputDevice = MidiSystem.getMidiDevice(inputDeviceInfo);
-				outputDevice1 = MidiSystem.getMidiDevice(outputDeviceInfo1);
-				outputDevice2 = MidiSystem.getMidiDevice(outputDeviceInfo2);
-
-				inputDevice.open();
-				outputDevice1.open();
-				outputDevice2.open();
-
-				List<Receiver> receivers = new ArrayList<>();
-				receivers.add(outputDevice1.getReceiver());
-				if (!singleOut) {
-					receivers.add(outputDevice2.getReceiver());
-				}
-
-				transposingReceiver.setDelegates(receivers);
-				transposingReceiver.setSingleOut(singleOut);
-				inputDevice.getTransmitter().setReceiver(transposingReceiver);
-
-				System.out.println("MIDI Routing started.");
-			} catch (MidiUnavailableException ex) {
-				ex.printStackTrace();
-				JOptionPane.showMessageDialog(this, "Error opening MIDI devices: " + ex.getMessage(), "Error",
-						JOptionPane.ERROR_MESSAGE);
-			}
-		}
-	}
-
-	private void stopMidiRouting() {
-		if (inputDevice != null && inputDevice.isOpen()) {
-			inputDevice.close();
-		}
-		if (outputDevice1 != null && outputDevice1.isOpen()) {
-			outputDevice1.close();
-		}
-		if (outputDevice2 != null && outputDevice2.isOpen()) {
-			outputDevice2.close();
-		}
-
-		inputDevice = null;
-		outputDevice1 = null;
-		outputDevice2 = null;
-
-		System.out.println("MIDI Routing stopped.");
-	}
-
-	private void updateTransposeLabel() {
-		transposeLabel.setText("Transpose: " + transposingReceiver.getTransposeValue());
-	}
-
-	private void updateOctaveShiftLabel() {
-		octaveShiftLabel.setText("Octave Shift: " + transposingReceiver.getOctaveShift());
-	}
-
-	static class TransposingReceiver implements Receiver {
-		private int transposeValue = 0;
-		private int octaveShift = 0;
-		private MultiOutputReceiver multiOutputReceiver;
-		private boolean singleOut = false;
-
-		private ShortMessage transposedMessage = new ShortMessage();
-
-		public TransposingReceiver(List<Receiver> outputDelegates) {
-			multiOutputReceiver = new MultiOutputReceiver(outputDelegates);
-		}
-
-		public void setTransposeValue(int transposeValue) {
-			this.transposeValue = Math.max(-12, Math.min(12, transposeValue));
-		}
-
-		public int getTransposeValue() {
-			return transposeValue;
-		}
-
-		public void setOctaveShift(int octaveShift) {
-			this.octaveShift = Math.max(-7, Math.min(7, octaveShift));
-		}
-
-		public int getOctaveShift() {
-			return octaveShift;
-		}
-
-		public void setDelegates(List<Receiver> delegates) {
-			multiOutputReceiver.setDelegates(delegates);
-		}
-
-		public void setSingleOut(boolean singleOut) {
-			this.singleOut = singleOut;
-		}
-
-		@Override
-		public void send(MidiMessage message, long timeStamp) {
-			if (message instanceof ShortMessage) {
-				ShortMessage shortMessage = (ShortMessage) message;
-				int command = shortMessage.getCommand();
-
-				if (command == ShortMessage.NOTE_ON || command == ShortMessage.NOTE_OFF) {
-					int originalData = shortMessage.getData1();
-					int transposedData = (originalData + transposeValue + (octaveShift * 12)) % 128;
-
-					try {
-						transposedMessage.setMessage(command, shortMessage.getChannel(), transposedData,
-								shortMessage.getData2());
-
-						if (singleOut) {
-							if (multiOutputReceiver.getDelegates().size() > 0) {
-								// Send only to the first receiver if singleOut is true
-								multiOutputReceiver.getDelegates().get(0).send(transposedMessage, timeStamp);
-							}
-						} else {
-							multiOutputReceiver.send(transposedMessage, timeStamp);
-						}
-					} catch (InvalidMidiDataException e) {
-						e.printStackTrace();
-					}
-				} else if (command == ShortMessage.CONTROL_CHANGE) {
-					// Forward Control Change (CC) messages unchanged
-					multiOutputReceiver.send(shortMessage, timeStamp);
-				}
+				g2d.setColor(new Color(255, 100, 100)); // Red for output nodes
+				g2d.fillOval(x - WIDTH / 2 - 5, y - 5, 10, 10);
 			}
 		}
 
-		@Override
-		public void close() {
-			multiOutputReceiver.close();
+		public boolean contains(Point p) {
+			return p.x >= x - WIDTH / 2 && p.x <= x + WIDTH / 2 && p.y >= y - HEIGHT / 2 && p.y <= y + HEIGHT / 2;
+		}
+
+		public int getX() {
+			return x;
+		}
+
+		public int getY() {
+			return y;
 		}
 	}
-
-	static class MultiOutputReceiver implements Receiver {
-		private List<Receiver> delegates = new ArrayList<>(10);
-
-		public MultiOutputReceiver(List<Receiver> delegates) {
-			if (delegates != null) {
-				this.delegates.addAll(delegates);
-			}
-		}
-
-		public void setDelegates(List<Receiver> delegates) {
-			this.delegates.clear();
-			if (delegates != null) {
-				this.delegates.addAll(delegates);
-			}
-		}
-
-		public List<Receiver> getDelegates() {
-			return delegates;
-		}
-
-		@Override
-		public void send(MidiMessage message, long timeStamp) {
-			for (Receiver delegate : delegates) {
-				delegate.send(message, timeStamp);
-			}
-		}
-
-		@Override
-		public void close() {
-			for (Receiver delegate : delegates) {
-				delegate.close();
-			}
-			delegates.clear();
-		}
-	}
-
 }

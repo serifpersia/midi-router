@@ -35,7 +35,7 @@
 					<archive>
 						<manifest>
 							<mainClass>
-								midi.router.MidiRouter</mainClass>
+								midi.router.MidiRouterMain</mainClass>
 						</manifest>
 					</archive>
 				</configuration>
